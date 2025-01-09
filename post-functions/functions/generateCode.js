@@ -1,8 +1,8 @@
 const { connection } = require("../../config/connection");
 const { NotFoundError } = require("../../error");
 
-async function GenerateCode(table, tableId, code) {
-  const [[result]] = await connection.query(
+async function GenerateCode(table, tableId, code, pool) {
+  const [[result]] = await pool.query(
     `SELECT MAX(CAST(SUBSTRING_INDEX(${tableId}, '/', -1) AS UNSIGNED)) AS maxNumber
    FROM ${table}
    WHERE ${tableId} LIKE ?`,

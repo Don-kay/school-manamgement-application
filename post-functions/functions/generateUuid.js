@@ -2,7 +2,7 @@ const { connection } = require("../../config/connection");
 const uuId = require("./uniqueId");
 const { v4: uuidv4 } = require("uuid");
 
-async function GenerateUUId(table, tableId, code) {
+async function GenerateUUId(table, tableId, code, pool) {
   try {
     let idExists = true;
     let generatedId;
@@ -15,7 +15,7 @@ async function GenerateUUId(table, tableId, code) {
       generatedId = uuId(uuid, code);
       // generatedId = `f7662227-7812-450c-ae9c-6cd783ac88d1-260098160376000-160676578364+${code}`;
 
-      const [rows] = await connection.query(
+      const [rows] = await pool.query(
         `SELECT COUNT(*) as count FROM ${table} WHERE ${tableId} = ?`,
         [generatedId]
       );

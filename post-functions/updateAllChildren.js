@@ -38,7 +38,6 @@ const updateAllChildren = async (
       await transaction.query(updateQuery, queryParams);
     }
   } catch (error) {
-    await transaction.rollback(); // Rollback in case of any error
     throw error; // Re-throw the error after rollback
   }
 };

@@ -1,9 +1,12 @@
 const { connection } = require("../config/connection");
 const { StatusCodes } = require("http-status-codes");
 const updateWard = require("../post-functions/updateData");
+const { DataError, BadRequestError } = require("../error");
+const FetchMany = require("./fetchMany");
 
-const DeLinkLearner = async (table, data, insertId) => {
-  const ward = { ward: null, parent_id: null };
+const DeLinkLearner = async (table, data, insertId, branchPool) => {
+  const { parent_id } = data;
+  const ward = { ward: null, parent_id: null, surname: "no name" };
 
   // Build the WHERE clause dynamically using Object.entries
   const conditions = Object.entries(data)
@@ -11,29 +14,61 @@ const DeLinkLearner = async (table, data, insertId) => {
     .join(" AND ");
 
   const values = Object.values(data);
-  const [result] = await connection.query(
-    `DELETE FROM ${table} WHERE ${conditions}`,
-    values
-  );
+
   try {
+    const [result] = await branchPool.query(
+      `DELETE FROM ${table} WHERE ${conditions}`,
+      values
+    );
+
     if (result.affectedRows > 0) {
-      const deleteWard = await updateWard(
+      const unlinkWard = await updateWard(
         "montessori_learners",
         ward,
         "learner_id",
-        insertId
+        insertId,
+        branchPool
       );
+      const [parentkids] = await FetchMany(
+        "montessori_learners",
+        "parent_id",
+        parent_id,
+        branchPool
+      );
+      if (!parentkids) {
+        throw new DataError("couldn't access resource");
+      }
+      const numberOfKids = parentkids.length === 0 ? 0 : parentkids.length;
+
+      let incrementquery = `UPDATE parents SET registered_kids = ? WHERE parent_id = ?`;
+
+      const [addChildtoParent] = await branchPool.query(
+        incrementquery,
+        [numberOfKids, parent_id],
+        (err, result) => {
+          if (err) {
+            throw err;
+          } else {
+            return `Rows affected: ${result}`;
+          }
+        }
+      );
+
+      if (addChildtoParent.affectedRows <= 0) {
+        throw new DataError("unable to update parent data");
+      }
+
       return {
         msg: "Learner successfully de-linked from parent",
-        deleteWard,
+        unlinkWard,
       };
     } else {
-      return {
-        msg: "failed to de-link Learner from parent ::) no linked parent and learner",
-      };
+      throw new BadRequestError(
+        "failed to de-link Learner from parent ::) no linked parent and learner"
+      );
     }
   } catch (error) {
-    return { message: "Error de-linking pupil from parent", error };
+    throw error;
   }
 };
 

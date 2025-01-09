@@ -6,11 +6,27 @@ const { BadRequestError, NotFoundError, DataError } = require("../error");
 const fetchallExistence = require("../post-functions/fetchallExistence");
 const checkallExistence = require("../post-functions/functions/checkallExistence");
 const FetchMany = require("../post-functions/fetchMany");
+const { masterPool } = require("../config/connection");
+const checkallDBExistence = require("../post-functions/branchDB/checkallDBExistence");
+const {
+  beginTransaction,
+  rollbackTransaction,
+  commitTransaction,
+} = require("../post-functions/functions/dbTransactionHelper");
+const checkoneExistence = require("../post-functions/functions/checkoneExistence");
 
 const createParent = async (req, res, next) => {
   const { alias, branchid: branch_id } = req.params;
   const { phone_number, email, title } = req.body;
 
+  const branchPool = req.branchPool;
+
+  let branchConnection;
+
+  branchConnection = await beginTransaction(branchPool);
+  //  hqConnection = await beginTransaction(branchPool);
+
+  // const branchConnection = await beginTransaction(branchPool);
   const validatePhoneNumber = (phone, label) => {
     if (!/^\d{10}$/.test(phone)) {
       throw new BadRequestError(
@@ -29,9 +45,13 @@ const createParent = async (req, res, next) => {
 
   try {
     const gender = title === "Mr" || title === "Mr and Mrs" ? "male" : "female";
+    if (phone_number) {
+      validatePhoneNumber(phone_number, "phone");
+    }
+    if (email) {
+      validateEmail(email, "user");
+    }
 
-    validatePhoneNumber(phone_number, "phone");
-    validateEmail(email, "user");
     if (!branch_id) {
       return next(
         new DataError("Unable to complete request, please specify a branch.")
@@ -39,10 +59,19 @@ const createParent = async (req, res, next) => {
     }
 
     const [branchData, [currentSession]] = await Promise.all([
-      checkallExistence("branch", { branch_id, alias }, "AND"),
-      fetchallExistence("academic_session", {
-        current: "true",
-      }),
+      checkallExistence(
+        "branch",
+        { branch_id, alias },
+        "AND",
+        branchConnection
+      ),
+      fetchallExistence(
+        "academic_session",
+        {
+          current: "true",
+        },
+        branchConnection
+      ),
     ]);
 
     if (!branchData) {
@@ -62,7 +91,14 @@ const createParent = async (req, res, next) => {
     const session_id = currentSession.session_id;
     const year = currentSession.session;
 
-    const parent_id = await generateUUId("parents", "parent_id", "PARENT");
+    const parent_id = await generateUUId(
+      "parents",
+      "parent_id",
+      "PARENT",
+      branchConnection
+    );
+
+    // console.log(parent_id);
 
     if (
       !parent_id ||
@@ -86,16 +122,29 @@ const createParent = async (req, res, next) => {
       registered_kids: 0,
     };
 
-    const parentProp = await ParentsFunction.create(req.body, parent_id);
+    const parentProp = await ParentsFunction.create(
+      req.body,
+      parent_id,
+      branchConnection
+    );
+
+    await commitTransaction(branchConnection);
     return res.status(StatusCodes.CREATED).json(parentProp);
   } catch (error) {
+    if (branchConnection) await rollbackTransaction(branchConnection);
     // console.log(error);
     return next(error);
   }
 };
 const updateParent = async (req, res, next) => {
   const { parentid: parent_id, alias, branchid: branch_id } = req.params;
-  const { phone_number, email } = req.body;
+  const { phone_number, email, title } = req.body;
+
+  const branchPool = req.branchPool;
+
+  let branchConnection;
+
+  branchConnection = await beginTransaction(branchPool);
 
   const validatePhoneNumber = (phone, label) => {
     if (!/^\d{10}$/.test(phone)) {
@@ -112,10 +161,15 @@ const updateParent = async (req, res, next) => {
       );
     }
   };
-
+  const gender = title === "Mr" || title === "Mr and Mrs" ? "male" : "female";
   try {
-    validatePhoneNumber(phone_number, "phone");
-    validateEmail(email, "user");
+    if (phone_number) {
+      validatePhoneNumber(phone_number, "phone");
+    }
+    if (email) {
+      validateEmail(email, "user");
+    }
+
     if (!branch_id) {
       return next(
         new DataError("Unable to complete request, please specify a branch.")
@@ -123,8 +177,13 @@ const updateParent = async (req, res, next) => {
     }
 
     const [branchData, checkParentExists] = await Promise.all([
-      checkallExistence("branch", { branch_id, alias }, "AND"),
-      checkallExistence("parents", { branch_id, parent_id }, "AND"),
+      checkallExistence(
+        "branch",
+        { branch_id, alias },
+        "AND",
+        branchConnection
+      ),
+      checkoneExistence("parents", "parent_id", parent_id, branchConnection),
     ]);
 
     if (!branchData) {
@@ -138,11 +197,12 @@ const updateParent = async (req, res, next) => {
     const [fetchParentsKids] = await FetchMany(
       "montessori_learners",
       "parent_id",
-      parent_id
+      parent_id,
+      branchConnection
     );
 
     const learnerId = fetchParentsKids.map((idx) => idx.learner_id);
-    //console.log(learnerId);
+
     if (!checkParentExists) {
       return next(
         new BadRequestError(
@@ -151,18 +211,21 @@ const updateParent = async (req, res, next) => {
       );
     }
 
-    // req.body = { ...req.body };
+    req.body = { ...req.body, gender };
 
     // Update parent properties
     const parentProp = await ParentsFunction.update(
       req.body,
       parent_id,
-      learnerId
+      learnerId,
+      branchConnection
     );
 
+    await commitTransaction(branchConnection);
     // Respond with success
     res.status(StatusCodes.CREATED).json({ parentProp });
   } catch (error) {
+    if (branchConnection) await rollbackTransaction(branchConnection);
     // Respond with error
     return next(error);
   }

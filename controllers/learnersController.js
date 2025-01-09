@@ -1,17 +1,35 @@
 const LearnersFunction = require("../db_functions/learners");
 const generateUUId = require("../post-functions/functions/generateUuid");
 const checkId = require("../post-functions/functions/checksingleExistence");
-const { DataError, NotFoundError, BadRequestError } = require("../error");
+const {
+  DataError,
+  NotFoundError,
+  BadRequestError,
+  Success,
+} = require("../error");
 const { StatusCodes } = require("http-status-codes");
 const checkallExistence = require("../post-functions/functions/checkallExistence");
 const fetchallExistence = require("../post-functions/fetchallExistence");
 const GenerateCode = require("../post-functions/functions/generateCode");
 const checkoneExistence = require("../post-functions/functions/checkoneExistence");
 const FetchSingleData = require("../post-functions/fetchSingleInputedData");
+const checkallDBExistence = require("../post-functions/branchDB/checkallDBExistence");
+const {
+  beginTransaction,
+  rollbackTransaction,
+  commitTransaction,
+} = require("../post-functions/functions/dbTransactionHelper");
+const { masterPool } = require("../config/connection");
 
 const createLearner = async (req, res, next) => {
   const { alias, branchid: branch_id } = req.params;
   const { parent_id, dob, age } = req.body;
+
+  const branchPool = req.branchPool;
+
+  let branchConnection;
+
+  branchConnection = await beginTransaction(branchPool);
 
   try {
     const learnerInputAge = dob.split("-")[0];
@@ -19,23 +37,31 @@ const createLearner = async (req, res, next) => {
     const learnerAge = currentYear - learnerInputAge;
 
     const [branchExists, [currentSession], parent] = await Promise.all([
-      checkallExistence("branch", { branch_id, alias }, "AND"),
-      fetchallExistence("academic_session", {
-        current: "true",
-      }),
-      FetchSingleData("parents", "parent_id", parent_id),
+      checkallExistence(
+        "branch",
+        { branch_id, alias },
+        "AND",
+        branchConnection
+      ),
+      fetchallExistence(
+        "academic_session",
+        {
+          current: "true",
+        },
+        masterPool
+      ),
+      FetchSingleData("parents", "parent_id", parent_id, branchConnection),
     ]);
 
+    if (!currentSession) {
+      return next(
+        new NotFoundError("Current session not found. Please contact support")
+      );
+    }
     if (!branchExists) {
       return next(new NotFoundError("branch doesn't exist"));
     }
-    if (!parent || Object.keys(parent).length === 0) {
-      return next(
-        new NotFoundError(
-          "Parent information is not available or invalid. Please verify and try again."
-        )
-      );
-    }
+
     if (age !== learnerAge) {
       return next(
         new BadRequestError("Invalid age, please verify and try again.")
@@ -53,7 +79,8 @@ const createLearner = async (req, res, next) => {
     const learner_id = await generateUUId(
       "montessori_learners",
       "learner_id",
-      "LEARN"
+      "LEARNER",
+      branchConnection
     );
 
     if (learner_id === "failed to generate unique id after 10 attempts") {
@@ -68,7 +95,8 @@ const createLearner = async (req, res, next) => {
     const admission_number = await GenerateCode(
       "montessori_learners",
       "admission_number",
-      prefix
+      prefix,
+      branchConnection
     );
     //console.log(generateCode);
 
@@ -86,30 +114,61 @@ const createLearner = async (req, res, next) => {
       state_of_origin: containsSubstring ? parent.state_of_origin : "none",
     };
 
-    const learnerId = await LearnersFunction.create(req.body, learner_id);
+    const learnerId = await LearnersFunction.create(
+      req.body,
+      learner_id,
+      branchConnection
+    );
+
+    await commitTransaction(branchConnection);
     return res.status(StatusCodes.CREATED).json({ learnerId });
   } catch (error) {
+    if (branchConnection) await rollbackTransaction(branchConnection);
     // console.log(error);
-    next(error);
+    return next(error);
   }
 };
 
 const updateLearner = async (req, res, next) => {
-  const { learnerid: learner_id } = req.params;
-  const updateData = req.body;
+  const { alias, branchid: branch_id, learnerid: learner_id } = req.params;
+  const { parent_id } = req.body;
+
+  const branchPool = req.branchPool;
 
   try {
-    const idPresent = await checkId(
-      "montessori_learners",
-      "learner_id",
-      learner_id
-    );
-
-    if (idPresent?.err) {
-      throw new NotFoundError(`User with id: ${learner_id} doesn't exist`);
+    if (parent_id) {
+      return next(new BadRequestError("cant update parent"));
     }
 
-    const learnerProp = await LearnersFunction.update(updateData, learner_id);
+    const branchExists = await checkallExistence(
+      "branch",
+      { branch_id, alias },
+      "AND",
+      branchPool
+    );
+
+    if (!branchExists) {
+      return next(new NotFoundError("branch doesn't exist"));
+    }
+
+    const idPresent = await checkoneExistence(
+      "montessori_learners",
+      "learner_id",
+      learner_id,
+      branchPool
+    );
+
+    if (!idPresent) {
+      return next(
+        new NotFoundError(`learner with id: ${learner_id} doesn't exist`)
+      );
+    }
+
+    const learnerProp = await LearnersFunction.update(
+      req.body,
+      learner_id,
+      branchPool
+    );
     return res.status(StatusCodes.OK).json({ learnerProp });
   } catch (error) {
     // Proper error logging can be added here if needed, e.g., using a logging library
@@ -118,67 +177,157 @@ const updateLearner = async (req, res, next) => {
 };
 
 const delinkLearner = async (req, res, next) => {
-  const { learnerid } = req.params;
+  const { alias, branchid: branch_id, learnerid: learner_id } = req.params;
   const { parent_id } = req.body;
 
+  const branchPool = req.branchPool;
+
+  let branchConnection;
+
+  branchConnection = await beginTransaction(branchPool);
+
   // Check if both learnerid and parent_id are provided
-  if (!learnerid || !parent_id) {
+  if (!learner_id || !parent_id) {
     return next(new BadRequestError("Learner ID and Parent ID are required"));
   }
 
   try {
+    const [branchExists, exists] = await Promise.all([
+      checkallExistence(
+        "branch",
+        { branch_id, alias },
+        "AND",
+        branchConnection
+      ),
+      checkallExistence(
+        "parents_learners",
+        { parent_id, learner_id },
+        "AND",
+        branchConnection
+      ),
+    ]);
+
     // Check if the parent_id exists
-    const idPresent = await checkId("parents_learners", "parent_id", parent_id);
-    if (idPresent.err === 404) {
+    if (!branchExists) {
+      return next(new NotFoundError("branch doesn't exist"));
+    }
+    if (!exists) {
       return next(
-        new NotFoundError(`User with id: ${parent_id} doesn't exist`)
+        new NotFoundError(
+          `sorry there is no link between parent and learner value`
+        )
       );
     }
 
     // Perform the delink operation
-    const userId = await LearnersFunction.delinkLearner({
-      learner_id: learnerid,
-      parent_id,
-    });
+    const userId = await LearnersFunction.delinkLearner(
+      {
+        learner_id,
+        parent_id,
+      },
+      branchConnection
+    );
+
+    await commitTransaction(branchConnection);
     return res.status(StatusCodes.OK).json({ userId });
   } catch (error) {
-    // Log the error for debugging purposes
-    //console.error(`Error in delinkLearner: ${error.message}`);
+    if (branchConnection) await rollbackTransaction(branchConnection);
     next(error);
   }
 };
 
 const linkLearner = async (req, res, next) => {
+  const { alias, branchid: branch_id, learnerid: learner_id } = req.params;
+  const { parent_id } = req.body;
+
+  const branchPool = req.branchPool;
+
+  let branchConnection;
+  branchConnection = await beginTransaction(branchPool);
+
+  if (!learner_id || !parent_id) {
+    return next(new BadRequestError("Learner ID and Parent ID are required"));
+  }
   try {
-    const { learnerid } = req.params;
-    const { parent_id } = req.body;
+    const [
+      branchExists,
+      plExists,
+      learnerExist,
+      parentExist,
+      [currentSession],
+    ] = await Promise.all([
+      checkallExistence(
+        "branch",
+        { branch_id, alias },
+        "AND",
+        branchConnection
+      ),
+      checkallExistence(
+        "parents_learners",
+        { parent_id, learner_id },
+        "AND",
+        branchConnection
+      ),
+      checkoneExistence(
+        "montessori_learners",
+        "learner_id",
+        learner_id,
+        branchConnection
+      ),
+      checkoneExistence("parents", "parent_id", parent_id, branchConnection),
+      fetchallExistence(
+        "academic_session",
+        {
+          current: "true",
+        },
+        masterPool
+      ),
+    ]);
 
-    if (linkId === "failed to generate unique id after 10 attempts") {
-      throw new Error("Unable to generate a unique link ID");
+    if (!currentSession) {
+      return next(
+        new NotFoundError("Current session not found. Please contact support")
+      );
+    }
+    // Check if the parent_id exists
+    if (!branchExists) {
+      return next(new NotFoundError("branch doesn't exist"));
+    }
+    if (plExists) {
+      return next(
+        new Success(`Parent and learner value has already been linked`)
+      );
+    }
+    if (!learnerExist) {
+      return next(
+        new NotFoundError(`learner with id: ${learner_id} does not exist`)
+      );
+    }
+    if (!parentExist) {
+      return next(
+        new NotFoundError(`parent with id: ${parent_id} does not exist`)
+      );
     }
 
-    // Check if parent_id exists in the database
-    const idCheckResult = await checkId(
-      "parents_learners",
-      "parent_id",
-      parent_id
-    );
-
-    if (idCheckResult.err === 404) {
-      throw new NotFoundError(`User with id: ${parent_id} doesn't exist`);
-    }
+    const session_id = currentSession?.session_id;
+    const year = currentSession?.session;
 
     // Prepare data for linking learner to parent
     const data = {
-      learner_id: learnerid,
+      learner_id,
       parent_id,
-      parents_learners_id: linkId,
+      session_id,
+      year,
+      branch_id,
     };
 
     // Link the learner and return the result
-    const userId = await LearnersFunction.linkLearner(data);
-    return res.status(StatusCodes.OK).json(userId);
+    const Link = await LearnersFunction.linkLearner(data, branchConnection);
+    await commitTransaction(branchConnection);
+
+    return res.status(StatusCodes.OK).json(Link);
   } catch (error) {
+    if (branchConnection) await rollbackTransaction(branchConnection);
     next(error);
   }
 };

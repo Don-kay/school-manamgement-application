@@ -14,33 +14,59 @@ const {
 const _ = require("lodash");
 const { StatusCodes } = require("http-status-codes");
 const checkallExistence = require("../post-functions/functions/checkallExistence");
+const deleteData = require("../post-functions/deleteData");
 
 // console.log(parentsLearnerId);
 
 const LevelClass = {
-  create: async (linkData, id) => {
+  create: async (linkData, hqPool, branchPool) => {
+    const { level_id, class_id } = linkData;
+    const c_key = [level_id, class_id];
     // console.log(linkData);
-    try {
-      const data = await CreateData(
-        "branch_classes",
-        linkData,
-        "branchclass_id",
-        id
-      );
-      return data;
-    } catch (error) {
-      throw error;
-    }
+
+    const data = await CreateData(
+      "branch_classes",
+      linkData,
+      "level_id",
+      c_key,
+      branchPool,
+      "class_id",
+      "AND"
+    );
+
+    const syncData = await CreateData(
+      "branch_classes",
+      data,
+      "level_id",
+      c_key,
+      hqPool,
+      "class_id",
+      "AND"
+    );
+
+    return syncData;
   },
-  update: async (linkData, id) => {
+  update: async (linkData, id, hqPool, branchPool) => {
     // Call the function to update a product
     const data = await UpdateData(
       "branch_classes",
       linkData,
-      "branchclass_id",
-      id
+      "level_id",
+      id,
+      branchPool,
+      "class_id",
+      "AND"
     );
-    return data;
+    const syncData = await UpdateData(
+      "branch_classes",
+      data,
+      "level_id",
+      id,
+      hqPool,
+      "class_id",
+      "AND"
+    );
+    return syncData;
   },
   setGeneralPassword: async (password, connection) => {
     // Call the function to update a product
@@ -52,22 +78,30 @@ const LevelClass = {
     );
     return data;
   },
-  delinkLearner: async (user) => {
-    // Call the function to update a product
-    const { learner_id } = user;
-    // console.log(learner_id);
-    const data = await DeLinkLearner("parents_learners", user, learner_id);
+  delinkLearner: async (linkData, pool) => {
+    const data = await deleteData(
+      "learners_class",
+      "learner_id",
+      linkData,
+      pool,
+      "level_id",
+      "AND"
+    );
     return data;
   },
-  linkLearner: async (user) => {
-    // Call the function to update a product
-    const { parent_id } = user;
+  linkLearner: async (linkData, pool) => {
+    const { level_id, class_id } = linkData;
+    const c_key = [level_id, class_id];
 
-    const resp = await FetchsingleData("parents", "parent_id", parent_id);
-    // console.log(resp);
-    const ward = `${resp.title} ${resp.surname} ${resp.othernames} ${resp.firstname} `;
-    const wardData = { ward, parent_id };
-    const data = await ParentLearner("parents_learners", user, wardData);
+    const data = await CreateData(
+      "learners_class",
+      linkData,
+      "level_id",
+      c_key,
+      pool,
+      "class_id",
+      "AND"
+    );
     return data;
   },
 };

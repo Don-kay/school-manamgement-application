@@ -1,16 +1,9 @@
+const { masterPool } = require("../../config/connection");
 const { StatusCodes } = require("http-status-codes");
-const FetchSingleData = require("./fetchSingleInputedData");
-const { BadRequestError } = require("../error");
+const FetchSingleMainDB = require("./fetchSinglemainDB");
+const { BadRequestError } = require("../../error");
 
-const updateData = async (
-  table,
-  updates,
-  rowId,
-  insertId,
-  pool,
-  rowId2,
-  opt
-) => {
+const updateDB = async (table, updates, rowId, insertId) => {
   try {
     // Build the query
     let query = `UPDATE ${table} SET `;
@@ -23,26 +16,15 @@ const updateData = async (
 
     // Remove the trailing comma and space
     query = query.slice(0, -2);
-    if (!opt) {
-      query += ` WHERE ${rowId} = ?`;
-      values.push(insertId);
-    } else {
-      query += ` WHERE ${rowId} = ? ${opt} ${rowId2} = ?`;
-      values.push(...insertId);
-    }
+    query += ` WHERE ${rowId} = ?`;
+    values.push(insertId);
 
     // Execute the query
-    const [result] = await pool.query(query, values);
+    const [result] = await masterPool.query(query, values);
     // Check if any rows were affected
     if (result.changedRows > 0) {
-      const fetchData = await FetchSingleData(
-        table,
-        rowId,
-        insertId,
-        pool,
-        rowId2,
-        opt
-      );
+      const fetchData = await FetchSingleMainDB(table, rowId, insertId);
+
       // Check if data was fetched successfully
       if (
         !fetchData ||
@@ -51,6 +33,7 @@ const updateData = async (
       ) {
         throw new BadRequestError("unable to fetch data");
       }
+
       return fetchData;
     } else {
       throw new BadRequestError("no change made");
@@ -60,4 +43,4 @@ const updateData = async (
   }
 };
 
-module.exports = updateData;
+module.exports = updateDB;

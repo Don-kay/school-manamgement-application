@@ -4,7 +4,7 @@ const { StatusCodes } = require("http-status-codes");
 const { BadRequestError, DataError } = require("../error");
 const FetchMany = require("./fetchMany");
 
-async function UpdateLearnerData(table, data, insertId, opt) {
+async function UpdateLearnerData(table, data, insertId, pool, opt) {
   const { parent_id, learner_id } = insertId;
   let query = `UPDATE ${table} SET `;
 
@@ -25,7 +25,7 @@ async function UpdateLearnerData(table, data, insertId, opt) {
 
   try {
     // Execute the query
-    await connection.query(query, values, (err, result) => {
+    await pool.query(query, values, (err, result) => {
       if (err) {
         throw err;
       } else {

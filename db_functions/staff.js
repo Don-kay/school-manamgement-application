@@ -10,6 +10,7 @@ const validateStaffData = require("../post-functions/functions/validateStaffData
 const updateTableColumns = require("../post-functions/updateTableColumns");
 const { connection } = require("../config/connection");
 const { logoutJwt } = require("../config/passwordConfig");
+const AssignStaffToBranch = require("../post-functions/functions/assignStaffToBranch");
 
 async function updateUserDetails(fields, updatedData, selectedData) {
   const values = [];
@@ -20,6 +21,7 @@ async function updateUserDetails(fields, updatedData, selectedData) {
       values.push(`${key}: ${updatedData[key]}`);
     }
   }
+
   if (values.length > 0) {
     return "vital detail changed.";
   }
@@ -27,36 +29,32 @@ async function updateUserDetails(fields, updatedData, selectedData) {
 }
 
 const Staff = {
-  create: async (user, staff_id) => {
-    const data = await CreateData("staff", user, "staff_id", staff_id);
+  create: async (user, staff_id, hqPool) => {
+    const data = await CreateData("staff", user, "staff_id", staff_id, hqPool);
     return data;
   },
-  update: async (user, id) => {
+  update: async (user, id, hqPool, branchPool, hqid, staffBranchid) => {
+    let syncData;
     const fieldsToCompare = [
       "firstname",
       "official_email",
       "role_id",
       "branch_id",
     ];
-
     // Build the query to only select relevant columns
     const getUserQuery = `SELECT ${fieldsToCompare} FROM staff WHERE staff_id = ?`;
 
-    const [fetchSelected] = await connection.query(getUserQuery, [id]);
+    const [fetchSelected] = await hqPool.query(getUserQuery, [id]);
 
     const selectedData = fetchSelected[0];
 
-    const data = await UpdateData("staff", user, "staff_id", id);
+    const data = await UpdateData("staff", user, "staff_id", id, hqPool);
 
-    const {
-      staff_id,
-      firstname,
-      surname,
-      title,
-      official_email,
-      role_id,
-      branch_id,
-    } = data;
+    if (hqid !== staffBranchid) {
+      syncData = await UpdateData("staff", data, "staff_id", id, branchPool);
+    }
+
+    const { firstname, official_email, role_id, branch_id } = data;
 
     const updatedData = { firstname, official_email, role_id, branch_id };
 
@@ -67,17 +65,30 @@ const Staff = {
     );
 
     if (checkUpdated === "vital detail changed.") {
-      const logout = await logoutJwt(
-        id,
-        firstname,
-        official_email,
-        role_id,
-        branch_id
-      );
-      return { logout, data };
+      const logout = await logoutJwt(id, branchPool);
+      return { logout, syncData };
     }
 
-    return data;
+    return syncData;
+  },
+  updateOfficialMail: async (
+    user,
+    id,
+    hqPool,
+    branchPool,
+    hqid,
+    staffBranchid
+  ) => {
+    let syncData;
+    const data = await UpdateData("staff", user, "staff_id", id, hqPool);
+
+    if (hqid !== staffBranchid) {
+      syncData = await UpdateData("staff", data, "staff_id", id, branchPool);
+    }
+
+    const logout = await logoutJwt(id, branchPool);
+
+    return { logout, syncData };
   },
   setGeneralPassword: async (password, connection) => {
     const set_password = await updateTableColumns(

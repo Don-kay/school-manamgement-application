@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const { getBranchPool } = require("../config/connection");
 const {
   UnauthenticatedError,
   NotFoundError,
@@ -18,17 +19,17 @@ const PanelRoute = (pathname) => {
   return pathname.startsWith("/panel/admin_dashboard");
 };
 
-const auth = (req, res, next) => {
+const auth = async (req, res, next) => {
   //check if theres no token in headers
   const AuthHeader = req.headers.cookie || req.headers.Cookie;
-  console.log(AuthHeader);
+  // console.log(AuthHeader);
   if (!AuthHeader || !AuthHeader.startsWith("token")) {
-    return next(new UnauthenticatedError("please login"));
+    return next(
+      new UnauthenticatedError("session expired, please login to access data")
+    );
   }
 
   const token = AuthHeader.split("=")[1];
-
-  // console.log(token);
 
   //token has all the user details
   //attach the user to course route
@@ -39,7 +40,7 @@ const auth = (req, res, next) => {
       }
       return res;
     });
-    console.log(payload);
+
     if (payload === "token expired") {
       return next(
         new UnauthenticatedError(
@@ -48,10 +49,22 @@ const auth = (req, res, next) => {
       );
     }
 
-    // console.log(verify);
+    //
     if (!payload) {
       return next(new UnauthenticatedError("password doesnt match"));
     }
+
+    const branchPool = await getBranchPool(payload.branch_id);
+
+    const [rows] = await branchPool.query(
+      "SELECT * FROM cookie_sessions WHERE session_id = ? AND expiresAt > NOW()",
+      [payload.session_id]
+    );
+
+    if (rows.length === 0) {
+      return next(new UnauthorizedError("Session invalid, please Re-login"));
+    }
+
     req.staff = {
       staff_id: payload.staff_id,
       firstname: payload.firstname,
@@ -61,30 +74,30 @@ const auth = (req, res, next) => {
       // token: verify,
     };
 
+    req.branchId = payload.branch_id;
     const url = req.url;
+    // if (isBranchRoute(url)) {
+    //   const branchId = url.match(/([a-zA-Z0-9-]+\+BRANCH)/)[1];
 
-    if (isBranchRoute(url)) {
-      const branchId = url.match(/([a-zA-Z0-9-]+\+BRANCH)/)[1];
+    //   if (!branchId) {
+    //     return next(
+    //       new NotFoundError("request failed:: Branch id doesn't exist")
+    //     );
+    //   }
+    //   // if (payload.branch_id !== branchId) {
+    //   //   return next(
+    //   //     new UnauthorizedError(
+    //   //       "access denied ::) you are not authorized to access this branch"
+    //   //     )
+    //   //   );
+    //   // }
 
-      if (!branchId) {
-        return next(
-          new NotFoundError("request failed:: Branch id doesn't exist")
-        );
-      }
-      // if (payload.branch_id !== branchId) {
-      //   return next(
-      //     new UnauthorizedError(
-      //       "access denied ::) you are not authorized to access this branch"
-      //     )
-      //   );
-      // }
-
-      req.branchId = branchId;
-    }
+    //   req.branchId = branchId;
+    // }
 
     next();
   } catch (error) {
-    return next(new UnauthenticatedError("password doesnt match"));
+    return next(error);
   }
 };
 module.exports = auth;

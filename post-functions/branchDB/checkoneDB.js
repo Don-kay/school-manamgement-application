@@ -1,8 +1,9 @@
+const { masterPool } = require("../../config/connection");
 const { StatusCodes } = require("http-status-codes");
 
-async function checkoneExistence(table, tableId, data, pool) {
+async function checkoneDB(table, tableId, data) {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await masterPool.query(
       `SELECT ${tableId} FROM ${table} WHERE ${tableId} = ? LIMIT 1`,
       [data]
     );
@@ -13,8 +14,8 @@ async function checkoneExistence(table, tableId, data, pool) {
       return true;
     }
   } catch (error) {
-    throw ("ERROR:", error);
+    return "ERROR:", error;
   }
 }
 
-module.exports = checkoneExistence;
+module.exports = checkoneDB;

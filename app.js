@@ -1,12 +1,11 @@
 require("dotenv").config();
 require("express-async-errors");
 
-const db = require("./config/connection");
 const express = require("express");
 const session = require("express-session");
 const bodyparser = require("body-parser");
-const DatabaseManager = require("./config/connection");
 const branchRouter = require("./routes/branchIdRouter");
+const branchDBRouter = require("./routes/branchDBRouter");
 
 const app = express();
 const cors = require("cors");
@@ -25,6 +24,7 @@ const AcademicsRouter = require("./routes/academicsRouter");
 const Authentication = require("./middleware/Authentication");
 const errorHandlerMiddleware = require("./middleware/error-handler");
 const notFoundMiddleware = require("./middleware/not-found");
+const getBranchPoolWare = require("./middleware/getBranchPoolware");
 
 app.use(bodyparser.json({ limit: "25mb" }));
 
@@ -46,20 +46,25 @@ app.use(
 );
 
 // Use branchRouter for all routes that include `branchId`
-app.use("/schoolmanagement/api", branchRouter);
 
 app.use("/schoolmanagement/api", accessRouter);
-// app.use("schoolmanagement/api", parentRouter);
+
+app.use(Authentication);
+app.use("/schoolmanagement/api", branchDBRouter);
+
+app.use(getBranchPoolWare);
+app.use("/schoolmanagement/api", branchRouter);
+app.use("schoolmanagement/api", parentRouter);
 app.use("/schoolmanagement/api", parentRouter);
-app.use("/schoolmanagement/api", Authentication, learnerRouter);
+app.use("/schoolmanagement/api", learnerRouter);
 app.use("/schoolmanagement/api", sessionRouter);
-app.use("/schoolmanagement/api", Authentication, sectionRouter);
-app.use("/schoolmanagement/api", Authentication, levelRouter);
+app.use("/schoolmanagement/api", sectionRouter);
+app.use("/schoolmanagement/api", levelRouter);
 app.use("/schoolmanagement/api", termRouter);
 app.use("/schoolmanagement/api", paymentRouter);
-// app.use("/schoolmanagement/api", Authentication, auxillaryRouter);
-app.use("/schoolmanagement/api", Authentication, staffRouter);
-app.use("/schoolmanagement/api", Authentication, AcademicsRouter);
+app.use("/schoolmanagement/api", auxillaryRouter);
+app.use("/schoolmanagement/api", staffRouter);
+app.use("/schoolmanagement/api", AcademicsRouter);
 
 // app.use("/schoolmanagement/api", paymentinstallmentRouter);
 

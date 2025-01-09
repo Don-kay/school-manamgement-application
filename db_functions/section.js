@@ -5,9 +5,11 @@ const UpdateMany = require("../post-functions/updateMany");
 const { StatusCodes } = require("http-status-codes");
 const { NotFoundError, DataError } = require("../error");
 const MissingFieldError = require("../error/missingFieldserror");
+const { CopySession } = require("../post-functions/functions/copySession");
+const { InsertMultipleData } = require("../post-functions/postMultipleData");
 
 const Sections = {
-  create: async (section, id) => {
+  create: async (section, id, hqPool, branchPool) => {
     const { section_name, section_id, branch_id, session_id, year, fees } =
       section;
 
@@ -24,13 +26,55 @@ const Sections = {
       );
     }
 
-    const data = await CreateData("sections", section, "section_id", id);
-    return data;
-  },
-  update: async (section, id) => {
-    // Call the function to update a product
-    const data = await UpdateData("sections", section, "section_id", id);
+    const data = await CreateData(
+      "sections",
+      section,
+      "section_id",
+      id,
+      hqPool
+    );
 
+    const syncData = await CreateData(
+      "sections",
+      data,
+      "section_id",
+      id,
+      branchPool
+    );
+    return syncData;
+  },
+  update: async (section, id, hqPool, branchPool) => {
+    // Call the function to update a product
+    const data = await UpdateData(
+      "sections",
+      section,
+      "section_id",
+      id,
+      hqPool
+    );
+    const syncData = await UpdateData(
+      "sections",
+      data,
+      "section_id",
+      id,
+      branchPool
+    );
+
+    return syncData;
+  },
+  copy: async (section, section_id, branchPool) => {
+    const copy = await CreateData(
+      "sections",
+      section,
+      "section_id",
+      section_id,
+      branchPool
+    );
+
+    return copy;
+  },
+  createMultiplSections: async (sections, pool) => {
+    const data = await InsertMultipleData("sections", sections, pool);
     return data;
   },
 };

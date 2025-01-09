@@ -1,8 +1,7 @@
-const { connection } = require("../../config/connection");
 const uuId = require("./uniqueId");
 const { v4: uuidv4 } = require("uuid");
 
-async function GenerateSchoolCode(table, tableId) {
+async function GenerateStaffCode(table, tableId, pool) {
   try {
     let idExists = true;
     let generatedId;
@@ -15,7 +14,7 @@ async function GenerateSchoolCode(table, tableId) {
       generatedId = (parseInt(uuid.slice(0, 7), 16) % 9000000) + 1000000;
       // generatedId = `f7662227-7812-450c-ae9c-6cd783ac88d1-260098160376000-160676578364+${code}`;
 
-      const [rows] = await connection.query(
+      const [rows] = await pool.query(
         `SELECT COUNT(*) as count FROM ${table} WHERE ${tableId} = ?`,
         [generatedId]
       );
@@ -33,4 +32,4 @@ async function GenerateSchoolCode(table, tableId) {
   }
 }
 
-module.exports = GenerateSchoolCode;
+module.exports = GenerateStaffCode;

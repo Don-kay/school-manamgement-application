@@ -1,18 +1,25 @@
 const BranchFunction = require("../db_functions/branchClass");
-const generateUUId = require("../post-functions/functions/generateUuid");
-const checkId = require("../post-functions/functions/checksingleExistence");
+const {
+  beginTransaction,
+  commitTransaction,
+  rollbackTransaction,
+} = require("../post-functions/functions/dbTransactionHelper");
 const {
   DataError,
   NotFoundError,
   BadRequestError,
   UnauthenticatedError,
 } = require("../error");
-const { connection } = require("../config/connection");
+const {
+  connection,
+  masterPool,
+  getBranchPool,
+} = require("../config/connection");
 const { StatusCodes } = require("http-status-codes");
 const checkoneExistence = require("../post-functions/functions/checkoneExistence");
 const checkallExistence = require("../post-functions/functions/checkallExistence");
 const fetchallExistence = require("../post-functions/fetchallExistence");
-const { hashPassword } = require("../config/passwordConfig");
+const FetchSinglemainDB = require("../post-functions/branchDB/fetchSinglemainDB");
 
 function hasOnlyOneSpecificObject(obj, targetObj) {
   const keys = Object.keys(obj);
@@ -31,44 +38,43 @@ function hasOnlyOneSpecificObject(obj, targetObj) {
 
 const branchClass = async (req, res, next) => {
   const { alias, branchid: branch_id } = req.params;
-  const { level_id, class_id } = req.body;
+  const { level_id, class_id, staff_id } = req.body;
 
-  // console.log(req);
+  const branchPool = req.branchPool;
 
-  //const staff_id = req.staff?.staff_id;
+  let branchConnection, hqConnection;
 
-  // const isAuthorized = await checkallExistence(
-  //   "staff",
-  //   { staff_id, branch_id },
-  //   "AND"
-  // );
+  branchConnection = await beginTransaction(branchPool);
 
-  // if (!isAuthorized) {
-  //   return next(
-  //     new UnauthenticatedError(
-  //       "you are not authenticated to access this branch, verify your branch and try again"
-  //     )
-  //   );
-  // }
-
+  const errorMessage = (type) =>
+    `${type} is invalid. Please recheck your details and try again. If the error persists, contact support.`;
   try {
+    const hq = await FetchSinglemainDB("branches", "hq", "true");
+    const hqid = hq.branch_id;
+
+    const hqPool = await getBranchPool(hqid);
+
+    hqConnection = await beginTransaction(hqPool);
+
     const [branchData, yearLevel, classType, classExist] = await Promise.all([
-      checkallExistence("branch", { branch_id, alias }, "AND"),
-      checkoneExistence("year_level", "level_id", level_id),
-      checkoneExistence("class_type", "class_id", class_id),
+      checkallExistence(
+        "branch",
+        { branch_id, alias },
+        "AND",
+        branchConnection
+      ),
+      checkoneExistence("year_level", "level_id", level_id, branchConnection),
+      checkoneExistence("class_type", "class_id", class_id, branchConnection),
       checkallExistence(
         "branch_classes",
         {
           level_id,
           class_id,
-          branch_id,
         },
-        "AND"
+        "AND",
+        branchConnection
       ),
     ]);
-
-    const errorMessage = (type) =>
-      `${type} is invalid. Please recheck your details and try again. If the error persists, contact support.`;
 
     if (!branchData) {
       return next(
@@ -79,12 +85,12 @@ const branchClass = async (req, res, next) => {
     }
 
     // Validate year level data
-    if (yearLevel === false) {
+    if (!yearLevel) {
       return next(new DataError(errorMessage("Year level")));
     }
 
     // Validate class type data
-    if (classType === false) {
+    if (!classType) {
       return next(new DataError(errorMessage("Class type")));
     }
 
@@ -94,11 +100,14 @@ const branchClass = async (req, res, next) => {
       );
     }
 
-    const [[currentSession], branchclass_id] = await Promise.all([
-      fetchallExistence("academic_session", {
-        current: "true",
-      }),
-      generateUUId("branch_classes", "branchclass_id", "YEARCLASS"),
+    const [[currentSession]] = await Promise.all([
+      fetchallExistence(
+        "academic_session",
+        {
+          current: "true",
+        },
+        branchConnection
+      ),
     ]);
 
     if (!currentSession) {
@@ -107,78 +116,79 @@ const branchClass = async (req, res, next) => {
       );
     }
 
-    if (
-      !branchclass_id ||
-      branchclass_id === "failed to generate unique id after 10 attempts"
-    ) {
-      return next(
-        new BadRequestError(
-          "Failed to generate a unique year level ID. Please try again."
-        )
+    if (staff_id !== undefined) {
+      const staffExtst = await checkallExistence(
+        "staff",
+        { staff_id, branch_id },
+        "AND",
+        branchConnection
       );
+      if (!staffExtst) {
+        return next(
+          new NotFoundError(`staff with id:${staff_id} doesn't exist`)
+        );
+      }
     }
 
-    req.body.branchclass_id = branchclass_id;
     req.body.session_id = currentSession.session_id;
     req.body.year = currentSession.session;
     req.body.branch_id = branch_id;
 
-    // const leveltoclassProp = await BranchFunction.create(
-    //   req.body,
-    //   branchclass_id
-    // );
-    // return res.status(StatusCodes.CREATED).json(leveltoclassProp);
+    //use branchclass instead of level id in the scores api
+
+    const leveltoclassProp = await BranchFunction.create(
+      req.body,
+      hqConnection,
+      branchConnection
+    );
+
+    await commitTransaction(branchConnection);
+    await commitTransaction(hqConnection);
+
+    return res.status(StatusCodes.CREATED).json(leveltoclassProp);
   } catch (error) {
-    // console.log(error);
-    next(error);
+    if (hqConnection) await rollbackTransaction(hqConnection);
+    if (branchConnection) await rollbackTransaction(branchConnection);
+
+    return next(error);
   }
 };
 const updateBranchClass = async (req, res, next) => {
-  const { alias, branchid, bclassid: branchclass_id } = req.params;
-  const { level_id, class_id, branch_id } = req.body;
+  const { alias, branchid: branch_id, levelid, classid } = req.params;
+  const { level_id, class_id, staff_id } = req.body;
 
+  const branchPool = req.branchPool;
+
+  let branchConnection, hqConnection;
+
+  branchConnection = await beginTransaction(branchPool);
+
+  const errorMessage = (type) =>
+    `${type} is invalid. Please recheck your details and try again. If the error persists, contact support.`;
   try {
-    const [
-      branchData,
-      branchClass,
-      yearLevel,
-      classType,
-      isAuthorized,
-      classExist,
-    ] = await Promise.all([
-      checkallExistence("branch", { branch_id: branchid, alias }, "AND"),
-      checkoneExistence("branch_classes", "branchclass_id", branchclass_id),
-      checkoneExistence("year_level", "level_id", level_id),
-      checkoneExistence("class_type", "class_id", class_id),
+    const hq = await FetchSinglemainDB("branches", "hq", "true");
+    const hqid = hq.branch_id;
+
+    const hqPool = await getBranchPool(hqid);
+
+    hqConnection = await beginTransaction(hqPool);
+
+    const [branchData, branchClass, yearLevel, classType] = await Promise.all([
       checkallExistence(
-        "branch_classes",
-        {
-          branch_id: branchid,
-          branchclass_id,
-        },
-        "AND"
+        "branch",
+        { branch_id, alias },
+        "AND",
+        branchConnection
       ),
       checkallExistence(
         "branch_classes",
-        {
-          level_id,
-          class_id,
-          branch_id,
-        },
-        "AND"
+        { level_id: levelid, class_id: classid },
+        "AND",
+        branchConnection
       ),
+      checkoneExistence("year_level", "level_id", level_id, branchConnection),
+      checkoneExistence("class_type", "class_id", class_id, branchConnection),
     ]);
-
-    if (!branchClass) {
-      return next(
-        new NotFoundError(
-          `Class with id:${branchclass_id} does not exist, please verify and try again. If error persist, contact support`
-        )
-      );
-    }
-
-    const errorMessage = (type) =>
-      `${type} is invalid. Please recheck your details and try again. If the error persists, contact support.`;
 
     if (!branchData) {
       return next(
@@ -189,57 +199,161 @@ const updateBranchClass = async (req, res, next) => {
     }
 
     // Validate year level data
-    if (yearLevel === false) {
-      return next(new DataError(errorMessage("Year level")));
+    if (level_id !== undefined) {
+      if (yearLevel === false) {
+        return next(new DataError(errorMessage("Year level")));
+      }
     }
 
-    // Validate class type data
-    if (classType === false) {
-      return next(new DataError(errorMessage("Class type")));
+    if (class_id !== undefined) {
+      // Validate class type data
+      if (classType === false) {
+        return next(new DataError(errorMessage("Class type")));
+      }
     }
 
-    if (!isAuthorized) {
-      throw new BadRequestError("fatal Error. unauthorized to make updates");
-    }
-
-    if (classExist) {
-      throw new DataError(
-        "unable complete request. class with input set exists, please verify details and try again"
+    if (!branchClass) {
+      return next(
+        new NotFoundError(
+          `Class does not exist, please verify and try again. If error persist, contact support`
+        )
       );
+    }
+
+    if ((level_id !== undefined) & (class_id !== undefined)) {
+      const classExist = await checkallExistence(
+        "branch_classes",
+        {
+          level_id,
+          class_id,
+        },
+        "AND",
+        branchConnection
+      );
+
+      if (classExist) {
+        throw new DataError(
+          "unable complete request. class with input set exists, please verify details and try again"
+        );
+      }
+    }
+
+    if (staff_id !== undefined) {
+      const staffExtst = await checkallExistence(
+        "staff",
+        { staff_id, branch_id },
+        "AND",
+        branchConnection
+      );
+      if (!staffExtst) {
+        return next(
+          new NotFoundError(`staff with id:${staff_id} doesn't exist`)
+        );
+      }
     }
 
     const leveltoclassProp = await BranchFunction.update(
       req.body,
-      branchclass_id
+      [levelid, classid],
+      hqConnection,
+      branchConnection
     );
+
+    await commitTransaction(branchConnection);
+    await commitTransaction(hqConnection);
+
     return res.status(StatusCodes.CREATED).json(leveltoclassProp);
   } catch (error) {
+    if (hqConnection) await rollbackTransaction(hqConnection);
+    if (branchConnection) await rollbackTransaction(branchConnection);
     // console.log(error);
     next(error);
   }
 };
-const setBClassPassword = async (req, res, next) => {
-  const { alias, branchid } = req.params;
-  const { password } = req.body;
+const linkLearnerToClass = async (req, res, next) => {
+  const { alias, branchid: branch_id } = req.params;
+  const { level_id, class_id, learner_id } = req.body;
 
-  const transactionConnect = await connection.getConnection();
+  const branchPool = req.branchPool;
+
+  let branchConnection;
+
+  branchConnection = await beginTransaction(branchPool);
+
+  const errorMessage = (type) =>
+    `${type} is invalid. Please recheck your details and try again. If the error persists, contact support.`;
 
   try {
-    await transactionConnect.beginTransaction();
+    const [[currentSession]] = await Promise.all([
+      fetchallExistence(
+        "academic_session",
+        {
+          current: "true",
+        },
+        branchPool
+      ),
+    ]);
 
-    // Function to check if an object has exactly one key-value pair with a specific object as its value
-    if (!hasOnlyOneSpecificObject(req.body, "password")) {
+    if (!currentSession) {
       return next(
-        new BadRequestError("invali request, task is strictly for password")
+        new NotFoundError("sorry, no current year set, please contact support")
       );
     }
 
-    const [branchData] = await Promise.all([
-      checkallExistence("branch", { branch_id: branchid, alias }, "AND"),
+    if (learner_id !== undefined) {
+      const learnerExist = await checkallExistence(
+        "montessori_learners",
+        { learner_id, branch_id },
+        "AND",
+        branchPool
+      );
+      if (!learnerExist) {
+        return next(
+          new NotFoundError(`learner with id:${learner_id} doesn't exist`)
+        );
+      }
+    }
+
+    const isLinked = await checkallExistence(
+      "learners_class",
+      { learner_id, level_id, class_id },
+      "AND",
+      branchPool
+    );
+
+    if (isLinked) {
+      return next(new DataError("learner exists in this class."));
+    }
+
+    const learnerExist = await checkoneExistence(
+      "learners_class",
+      "learner_id",
+      learner_id,
+      branchPool
+    );
+
+    if (learnerExist) {
+      throw new DataError(
+        "unable complete process. Learner already belongs to a class, please delink learner from class and try again"
+      );
+    }
+
+    const [branchData, yearLevel, classType, classExist] = await Promise.all([
+      checkallExistence("branch", { branch_id, alias }, "AND", branchPool),
+      checkoneExistence("year_level", "level_id", level_id, branchPool),
+      checkoneExistence("class_type", "class_id", class_id, branchPool),
+      checkallExistence(
+        "branch_classes",
+        {
+          level_id,
+          class_id,
+        },
+        "AND",
+        branchPool
+      ),
     ]);
 
     if (!branchData) {
-      await transactionConnect.rollback();
       return next(
         new NotFoundError(
           "Branch does not exist, please verify and try again. If error persist, contact support"
@@ -247,26 +361,106 @@ const setBClassPassword = async (req, res, next) => {
       );
     }
 
-    const hashPwd = await hashPassword(password);
+    // Validate year level data
+    if (!yearLevel) {
+      return next(new DataError(errorMessage("Year level")));
+    }
 
-    req.body.password = hashPwd;
+    // Validate class type data
+    if (!classType) {
+      return next(new DataError(errorMessage("Class type")));
+    }
 
-    await transactionConnect.commit();
-    const leveltoclassProp = await BranchFunction.setGeneralPassword(
+    if (!classExist) {
+      throw new DataError(
+        "unable complete process. class does not exist, please verify details and try again"
+      );
+    }
+    req.body.session_id = currentSession.session_id;
+    req.body.year = currentSession.session;
+    req.body.branch_id = branch_id;
+
+    //use branchclass instead of level id in the scores api
+
+    const learnertoclassProp = await BranchFunction.linkLearner(
       req.body,
-      transactionConnect
+      branchPool
     );
-    return res.status(StatusCodes.CREATED).json(leveltoclassProp);
+
+    await commitTransaction(branchConnection);
+
+    return res.status(StatusCodes.CREATED).json(learnertoclassProp);
   } catch (error) {
-    if (transactionConnect) await transactionConnect.rollback();
+    if (branchConnection) await rollbackTransaction(branchConnection);
+
+    return next(error);
+  }
+};
+const delinkLearnerFromClass = async (req, res, next) => {
+  const {
+    alias,
+    branchid: branch_id,
+    learnerid: learner_id,
+    levelid: level_id,
+    classid: class_id,
+  } = req.params;
+
+  const branchPool = req.branchPool;
+
+  // Check if both learnerid and parent_id are provided
+  if (!learner_id) {
+    return next(new BadRequestError("Learner ID are required"));
+  }
+
+  try {
+    const [branchExists, classExist, exists] = await Promise.all([
+      checkallExistence("branch", { branch_id, alias }, "AND", branchPool),
+      checkallExistence(
+        "branch_classes",
+        { level_id, class_id },
+        "AND",
+        branchPool
+      ),
+      checkallExistence(
+        "learners_class",
+        { learner_id, level_id, class_id },
+        "AND",
+        branchPool
+      ),
+    ]);
+
+    // Check if the parent_id exists
+    if (!branchExists) {
+      return next(new NotFoundError("branch doesn't exist"));
+    }
+    if (!classExist) {
+      return next(
+        new NotFoundError(
+          "class doesn't exist. Please ensure that class exist."
+        )
+      );
+    }
+    if (!exists) {
+      return next(
+        new NotFoundError(`sorry there is no link between learner and class`)
+      );
+    }
+
+    // Perform the delink operation
+    const userId = await BranchFunction.delinkLearner(
+      [learner_id, level_id],
+      branchPool
+    );
+
+    return res.status(StatusCodes.OK).json({ userId });
+  } catch (error) {
     next(error);
-  } finally {
-    if (transactionConnect) transactionConnect.release();
   }
 };
 
 module.exports = {
   branchClass,
   updateBranchClass,
-  setBClassPassword,
+  linkLearnerToClass,
+  delinkLearnerFromClass,
 };

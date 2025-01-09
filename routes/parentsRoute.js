@@ -11,7 +11,7 @@ router.post(
 );
 router.put(
   "/branch/update-parents/:alias/:branchid/:parentid",
-  AuthenticateRoles("MANAGE_STUDENT"),
+  // AuthenticateRoles("MANAGE_STUDENT"),
   parentController.updateParent
 );
 router.put(

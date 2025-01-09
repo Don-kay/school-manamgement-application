@@ -1,18 +1,11 @@
 // routes/branchRouter.js
 const express = require("express");
-const getBranchPool = require("../middleware/getBranchPool");
+const getBranchPoolware = require("../middleware/getBranchPoolware");
 const branchRouter = express.Router();
 const AuxController = require("../controllers/schoolAuxillieryController");
-const dbController = require("../controllers/main_dbController");
-const DatabaseManager = require("../config/connection");
-
-branchRouter.post("/storeDB_branch", dbController.createBranchDB);
-
-// Apply `withBranchId` middleware to all routes under this router
-branchRouter.use(getBranchPool);
 
 branchRouter.put(
-  "/update_branch/:alias/:branchid",
+  "/update_branch/:hqid/:alias/:branchid",
   // AuthenticateRoles("BRANCHING_AND_RECRUITMENT"),
   AuxController.updateBranchController
 );

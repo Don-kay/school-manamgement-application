@@ -1,6 +1,7 @@
+const { masterPool } = require("../../config/connection");
 const { StatusCodes } = require("http-status-codes");
 
-async function checkallExistence(table, parameter, opt, pool) {
+async function checkallDBExistence(table, parameter, opt) {
   let query = `SELECT * FROM ${table} WHERE `;
   const values = [];
   for (let [key, value] of Object.entries(parameter)) {
@@ -12,7 +13,7 @@ async function checkallExistence(table, parameter, opt, pool) {
   // console.log(query);
 
   try {
-    const [rows] = await pool.query(query, values);
+    const [rows] = await masterPool.query(query, values);
     if (rows?.length === 0) {
       return false;
     } else {
@@ -23,4 +24,4 @@ async function checkallExistence(table, parameter, opt, pool) {
   }
 }
 
-module.exports = checkallExistence;
+module.exports = checkallDBExistence;

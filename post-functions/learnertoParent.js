@@ -4,7 +4,7 @@ const { StatusCodes } = require("http-status-codes");
 const { BadRequestError, DataError } = require("../error");
 const FetchMany = require("./fetchMany");
 
-async function LinkLearnerData(table, data) {
+async function LinkLearnerData(table, data, pool) {
   const { parent_id, learner_id } = data;
 
   const insertId = [parent_id, learner_id];
@@ -28,7 +28,8 @@ async function LinkLearnerData(table, data) {
     const [parentkids] = await FetchMany(
       "montessori_learners",
       "parent_id",
-      parent_id
+      parent_id,
+      pool
     );
     if (!parentkids) {
       throw new DataError("couldn't access resource");
@@ -38,7 +39,7 @@ async function LinkLearnerData(table, data) {
     let incrementquery = `UPDATE parents SET registered_kids = ? WHERE parent_id = ?`;
 
     // Execute the query
-    const LinkLearner = await connection.query(query, values, (err, result) => {
+    const LinkLearner = await pool.query(query, values, (err, result) => {
       if (err) {
         throw err;
       } else {
@@ -47,7 +48,7 @@ async function LinkLearnerData(table, data) {
     });
 
     if (LinkLearner[0].affectedRows > 0) {
-      const [addChildtoParent] = await connection.query(
+      const [addChildtoParent] = await pool.query(
         incrementquery,
         [numberOfKids, parent_id],
         (err, result) => {
@@ -63,6 +64,7 @@ async function LinkLearnerData(table, data) {
         table,
         "parent_id",
         insertId,
+        pool,
         "learner_id",
         "AND"
       );
@@ -81,7 +83,6 @@ async function LinkLearnerData(table, data) {
       return {
         msg: "successfully linked to parent",
         fetchData,
-        msg1: "successfully updated parents childlist",
       };
     } else {
       throw new BadRequestError("failed to link data");

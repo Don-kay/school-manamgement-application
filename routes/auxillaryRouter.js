@@ -4,44 +4,35 @@ const AuthenticateRoles = require("../middleware/AuthenticateRoles");
 const branchRouter = require("./branchIdRouter");
 const router = express.Router();
 
-// router.post(
-//   "/new_branchcode/:alias/:branchid",
-//   AuxController.branchCodeController
-// );
 router.post(
-  "/new-general-code",
-  AuthenticateRoles("IT_OPERATION"),
+  "/new-general-tag/:hqid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.GeneralTagController
 );
 router.post(
-  "/new_role",
-  AuthenticateRoles("IT_OPERATION"),
+  "/new_role/:hqid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.rolesController
 );
 router.post(
-  "/new_role_hierarchy",
-  AuthenticateRoles("IT_OPERATION"),
+  "/new_role_hierarchy/:hqid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.rolesHierarchyController
 );
 router.post(
-  "/new_role_permission",
-  AuthenticateRoles("IT_OPERATION"),
+  "/new_role_permission/:hqid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.rolesPermissionController
 );
 router.post(
-  "/new_branch",
-  // AuthenticateRoles("BRANCHING_AND_RECRUITMENT"),
-  AuxController.BranchController
-);
-router.post(
-  "/new-school-mail",
-  AuthenticateRoles("IT_OPERATION"),
+  "/new-school-mail/:hqid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.schoolMailController
 );
 // router.post("/new-staff-code", AuxController.staffCodeController);
 router.post(
-  "/new-permission",
-  AuthenticateRoles("IT_OPERATION"),
+  "/new-permission/:hqid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.permissionController
 );
 // router.put(
@@ -50,18 +41,18 @@ router.post(
 //   AuxController.updateBranchcodeController
 // );
 router.put(
-  "/update-general-code/:tagid",
-  AuthenticateRoles("IT_OPERATION"),
+  "/update-general-tag/:hqid/:tagid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.updateGeneralTagController
 );
 router.put(
-  "/update-role/:roleid",
-  AuthenticateRoles("IT_OPERATION"),
+  "/update-role/:hqid/:roleid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.updateRoleController
 );
 router.put(
-  "/update-school-mail/:mailid",
-  AuthenticateRoles("IT_OPERATION"),
+  "/update-school-mail/:hqid/:mailid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.updateSchoolMailController
 );
 // branchRouter.put(
@@ -70,18 +61,18 @@ router.put(
 //   AuxController.updateBranchController
 // );
 router.put(
-  "/update-permission/:permissionid",
-  AuthenticateRoles("IT_OPERATION"),
+  "/update-permission/:hqid/:permissionid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.updatePermissionController
 );
 router.delete(
-  "/delete_role_hierarchy/:roleid/:paRole",
-  AuthenticateRoles("IT_OPERATION"),
+  "/delete_role_hierarchy/:hqid/:roleid/:paRole",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.deleteRolehierarachyController
 );
 router.delete(
-  "/delete_role_permission/:permid/:roleid",
-  AuthenticateRoles("IT_OPERATION"),
+  "/delete_role_permission/:hqid/:permid/:roleid",
+  // AuthenticateRoles("IT_OPERATION"),
   AuxController.deleteRolePermissionController
 );
 

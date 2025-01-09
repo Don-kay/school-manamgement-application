@@ -10,7 +10,44 @@ const masterPool = mysql.createPool({
   database: process.env.CENTRAL_DB_NAME,
 });
 
-const branchPools = new Map();
+const branchPools = new Map(); //for caching branch pools
+const poolTimeouts = new Map(); // Timeout references for pool closing
+const IDLE_TIMEOUT = 3600000; // 1 hour
+
+//Closes and removes a branch pool
+async function closeBranchPool(branchId) {
+  if (branchPools.has(branchId)) {
+    try {
+      await branchPools.get(branchId).end(); // Close pool
+      console.log(`Branch pool ${branchId} closed`);
+    } catch (error) {
+      console.error(`Error closing branch pool ${branchId}:`, error.message);
+    } finally {
+      branchPools.delete(branchId); // Remove from cache
+      poolTimeouts.delete(branchId); // Remove timeout reference
+    }
+  }
+}
+
+//  Resets the idle timeout for a branch pool
+
+function resetIdleTimeout(branchId) {
+  // Clear any existing timeout for this branch
+  if (poolTimeouts.has(branchId)) {
+    clearTimeout(poolTimeouts.get(branchId));
+  }
+
+  // Set a new timeout to close the pool
+  const timeout = setTimeout(() => {
+    closeBranchPool(branchId);
+  }, IDLE_TIMEOUT);
+
+  poolTimeouts.set(branchId, timeout);
+}
+
+/**
+ * Closes all active pools (for graceful shutdown)
+ */
 
 async function getBranchPool(branchId) {
   if (branchPools.has(branchId)) {
@@ -18,103 +55,31 @@ async function getBranchPool(branchId) {
   }
 
   //fetch branch db details from central database
-
   const [rows] = await masterPool.query(
-    "SELECT * FROM branch_connections WHERE branch_id = ?",
+    "SELECT * FROM branches WHERE branch_id = ?",
     [branchId]
   );
+
   if (rows.length === 0) {
-    console.log("INVALID ID");
+    console.log(`INVALID ID: ${branchId}`);
   }
-  console.log(rows[0]);
+  const { branch_port, branch_host, branch_user, branch_password, db } =
+    rows[0];
+
+  //create and cache the new pool
+  const branchPool = mysql.createPool({
+    host: branch_host,
+    user: branch_user,
+    password: branch_password,
+    port: branch_port,
+    database: db,
+  });
+
+  branchPools.set(branchId, branchPool);
+
+  resetIdleTimeout(branchId); //start idle timeout
+
+  return branchPool;
 }
-// async function storeBranchPool() {
-//   // if (branchPools.has(branchId)) {
-//   //   return branchPools.get(branchId);
-//   // }
-
-//   //fetch branch db details from central database
-
-//   console.log(branchPools);
-//   console.log(branchPools);
-
-//   const createBranchDB = await masterPool.query(
-//     "INSERT FROM branch_connections WHERE branch_id = ?",
-//     [branchId]
-//   );
-//   if (rows.length === 0) {
-//     console.log("INVALID ID");
-//   }
-//   // console.log(rows[0]);
-// }
 
 module.exports = { getBranchPool, masterPool };
-
-// class DatabaseManager {
-//   constructor() {
-//     this.branchConfig = {
-//       branch_main: {
-//         host: process.env.DB_HOST,
-//         user: process.env.DB_USER,
-//         password: process.env.DB_PASSWORD,
-//         port: process.env.DB_PORT || 3306,
-//         database: process.env.DB_MAIN,
-//       },
-//       branch_1: {
-//         host: process.env.DB_HOST,
-//         user: process.env.DB_USER,
-//         password: process.env.DB_PASSWORD,
-//         port: process.env.DB_PORT || 3306,
-//         database: process.env.DB_1,
-//       },
-//       branch_2: {
-//         host: process.env.DB_HOST,
-//         user: process.env.DB_USER,
-//         password: process.env.DB_PASSWORD,
-//         port: process.env.DB_PORT || 3306,
-//         database: process.env.DB_2,
-//       },
-//     };
-//     this.poolMap = new Map();
-//   }
-
-//   async getConnectionPool(branchId) {
-//     if (!this.branchConfig[branchId])
-//       throw new BadRequestError("Invalid Branch ID");
-
-//     if (!this.poolMap.has(branchId)) {
-//       const pool = mysql.createPool({
-//         ...this.branchConfig[branchId],
-//         waitForConnections: true,
-//         connectionLimit: 10,
-//         queueLimit: 0,
-//       });
-//       this.poolMap.set(branchId, pool);
-//     }
-//     return this.poolMap.get(branchId);
-//   }
-
-//   async query(branchId, sql, params = []) {
-//     const pool = await this.getConnectionPool(branchId);
-//     return pool.execute(sql, params);
-//   }
-
-//   closeAll() {
-//     this.poolMap.forEach((pool) => pool.end());
-//     this.poolMap.clear();
-//   }
-
-//   async checkConnection(branchId) {
-//     try {
-//       const pool = await this.getConnectionPool(branchId);
-//       const [connection] = await pool.query("SELECT 1");
-//       console.log(`Connected to the database for branch: ${branchId}`);
-//       return connection;
-//     } catch (error) {
-//       console.error("Error connecting to the database:", error.message);
-//       throw error;
-//     }
-//   }
-// }
-
-// module.exports = new DatabaseManager();

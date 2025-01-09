@@ -2,7 +2,7 @@ const { connection } = require("../config/connection");
 const { StatusCodes } = require("http-status-codes");
 const { Success, DataError } = require("../error");
 
-const UpdateMany = async (table, ids, affectedColumn, rowId) => {
+const UpdateMany = async (table, ids, affectedColumn, rowId, pool) => {
   if (!Array.isArray(ids) || ids.length === 0) {
     throw new Error("Invalid or empty IDs array");
   }
@@ -26,10 +26,10 @@ const UpdateMany = async (table, ids, affectedColumn, rowId) => {
   const values = [...Object.values(affectedColumn), ...ids];
 
   try {
-    const [result] = await connection.query(query, values);
+    const [result] = await pool.query(query, values);
 
     if (result.affectedRows === ids.length) {
-      throw new Success("Updated successfully");
+      return "Updated successfully";
     } else {
       throw new DataError("Some records were not updated");
     }

@@ -11,9 +11,10 @@ const validateEntityExistence = async (
   checkExistenceParams,
   errorMessage,
   sec_table,
-  opt
+  opt,
+  hqPool
 ) => {
-  const entityExists = await checkoneExistence(table, column, id);
+  const entityExists = await checkoneExistence(table, column, id, hqPool);
   if (!entityExists) {
     throw new DataError(
       `${table} information is not available or invalid. Please verify the ${table} details and try again.`
@@ -23,7 +24,8 @@ const validateEntityExistence = async (
   const isLinked = await checkallExistence(
     sec_table,
     checkExistenceParams,
-    opt
+    opt,
+    hqPool
   );
   if (isLinked) {
     throw new DataError(errorMessage);

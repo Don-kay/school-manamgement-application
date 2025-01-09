@@ -3,7 +3,15 @@ const { StatusCodes } = require("http-status-codes");
 const FetchSingleData = require("./fetchSingleInputedData");
 const { DataError } = require("../error");
 
-const CreateData = async (table, updates, rowId1, insertId, rowId2, opt) => {
+const CreateData = async (
+  table,
+  updates,
+  rowId1,
+  insertId,
+  pool,
+  rowId2,
+  opt
+) => {
   let query = `INSERT INTO ${table} (`;
   const values = [];
 
@@ -16,24 +24,19 @@ const CreateData = async (table, updates, rowId1, insertId, rowId2, opt) => {
   query = query.slice(0, -2) + ") VALUES (";
 
   query += values.map(() => "?").join(", ") + ")";
-  // console.log(query);
-  // console.log(values);
-  // Execute the query
-  const create = await connection.query(query, values, (err, result) => {
-    if (err) {
-      throw err;
-    } else {
-      return `Rows affected: ${result}`;
-    }
-  });
-  //console.log(create);
 
+  // console.log(values);
+  //console.log(pool);
+  // Execute the query
   try {
-    if (create[0].affectedRows > 0) {
+    const [create] = await pool.query(query, values);
+
+    if (create.affectedRows > 0) {
       const fetchData = await FetchSingleData(
         table,
         rowId1,
         insertId,
+        pool,
         rowId2,
         opt
       );
@@ -46,14 +49,13 @@ const CreateData = async (table, updates, rowId1, insertId, rowId2, opt) => {
           "unable to fetch information, id invalid. Please check the details and try again."
         );
       }
-      // console.log(fetchData);
       return fetchData;
     } else {
-      return null;
+      throw new DataError("unable to create data. Please try again.");
       // return { msg: "failed to create" };
     }
   } catch (error) {
-    return error;
+    throw error;
   }
 };
 
